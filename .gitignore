@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+venv/
+*.idx
+generated_images/*
+!generated_images/.gitkeep
