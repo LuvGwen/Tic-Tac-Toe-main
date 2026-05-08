@@ -40,6 +40,7 @@ class ChatGameClient:
         self.game = None
         self.chat_lines = []
         self.generated_image = None
+        self.peer_name = ""
 
         self.build_login_ui()
 
@@ -84,7 +85,11 @@ class ChatGameClient:
 
         game_panel = tk.Frame(main, bg="#222222", padx=8, pady=8)
         game_panel.grid(row=1, column=0, rowspan=2, sticky="n", padx=(0, 12))
-        self.game = TicTacToe(game_panel, send_network_msg_func=self.send_network_msg)
+        self.game = TicTacToe(
+            game_panel,
+            send_network_msg_func=self.send_network_msg,
+            send_game_event_func=self.send_game_event
+        )
 
         right_panel = tk.Frame(main)
         right_panel.grid(row=1, column=1, rowspan=2, sticky="nsew")
@@ -106,14 +111,15 @@ class ChatGameClient:
         tk.Button(side, text="Connect Peer", command=self.connect_peer).grid(row=3, column=1, sticky="ew")
         tk.Button(side, text="Who Is Online", command=self.request_user_list).grid(row=4, column=1, sticky="ew", pady=(6, 0))
         tk.Button(side, text="Disconnect Peer", command=self.disconnect_peer).grid(row=5, column=1, sticky="ew", pady=(6, 0))
-        tk.Button(side, text="Summarize Chat", command=self.show_chat_summary).grid(row=6, column=1, sticky="ew", pady=(12, 0))
-        tk.Button(side, text="Extract Keywords", command=self.show_chat_keywords).grid(row=7, column=1, sticky="ew", pady=(6, 0))
-        tk.Label(side, text="AI image prompt").grid(row=8, column=1, sticky="w", pady=(12, 0))
+        tk.Button(side, text="Start Network Game", command=self.start_network_game).grid(row=6, column=1, sticky="ew", pady=(12, 0))
+        tk.Button(side, text="Summarize Chat", command=self.show_chat_summary).grid(row=7, column=1, sticky="ew", pady=(12, 0))
+        tk.Button(side, text="Extract Keywords", command=self.show_chat_keywords).grid(row=8, column=1, sticky="ew", pady=(6, 0))
+        tk.Label(side, text="AI image prompt").grid(row=9, column=1, sticky="w", pady=(12, 0))
         self.image_prompt_entry = tk.Entry(side, width=28)
-        self.image_prompt_entry.grid(row=9, column=1, sticky="ew", pady=(4, 6))
-        tk.Button(side, text="Generate AI Image", command=self.generate_image_from_prompt).grid(row=10, column=1, sticky="ew")
+        self.image_prompt_entry.grid(row=10, column=1, sticky="ew", pady=(4, 6))
+        tk.Button(side, text="Generate AI Image", command=self.generate_image_from_prompt).grid(row=11, column=1, sticky="ew")
         self.image_status_label = tk.Label(side, text="No image generated yet.", anchor="w", justify="left")
-        self.image_status_label.grid(row=11, column=1, sticky="ew", pady=(6, 0))
+        self.image_status_label.grid(row=12, column=1, sticky="ew", pady=(6, 0))
 
         self.chat_display = scrolledtext.ScrolledText(right_panel, state="disabled", wrap="word", height=18)
         self.chat_display.grid(row=1, column=0, sticky="nsew", pady=(8, 8))
@@ -207,10 +213,13 @@ class ChatGameClient:
         if action == "connect":
             status = msg.get("status")
             if status == "success":
+                if not self.peer_name:
+                    self.peer_name = self.peer_entry.get().strip()
                 self.status_label.config(text="Connected to peer")
                 self.add_chat_line("System: peer connected.")
             elif status == "request":
                 peer = msg.get("from", "unknown")
+                self.peer_name = peer
                 self.status_label.config(text=f"Connected to {peer}")
                 self.add_chat_line(f"System: {peer} connected with you.")
             elif status == "self":
@@ -226,6 +235,31 @@ class ChatGameClient:
 
         if action == "list":
             self.add_chat_line("Online users:\n" + msg.get("results", ""))
+            return
+
+        if action == "system":
+            self.add_chat_line("System: " + msg.get("message", ""))
+            return
+
+        if action == "game_start":
+            peer = msg.get("from", "Peer")
+            self.peer_name = peer
+            self.game.start_network_game("O", x_name=peer, o_name=self.username)
+            self.status_label.config(text=f"Network game with {peer}")
+            self.add_chat_line(f"System: Network Tic-Tac-Toe started by {peer}. You are O.")
+            return
+
+        if action == "game_move":
+            self.game.receive_network_move(
+                int(msg.get("row")),
+                int(msg.get("col")),
+                msg.get("player")
+            )
+            return
+
+        if action == "game_reset":
+            self.game.receive_network_reset()
+            self.add_chat_line("System: Network game board reset.")
             return
 
         if action in ("time", "search", "poem"):
@@ -320,6 +354,7 @@ class ChatGameClient:
         if not peer:
             messagebox.showwarning("Connect", "Please enter a peer username.")
             return
+        self.peer_name = peer
         mysend(self.sock, json.dumps({"action": "connect", "target": peer}))
 
     def request_user_list(self):
@@ -327,7 +362,24 @@ class ChatGameClient:
 
     def disconnect_peer(self):
         mysend(self.sock, json.dumps({"action": "disconnect"}))
+        self.peer_name = ""
         self.status_label.config(text="Not connected to a peer")
+
+    def start_network_game(self):
+        peer = self.peer_name or self.peer_entry.get().strip()
+        if not peer:
+            messagebox.showwarning("Network Game", "Connect to a peer before starting a network game.")
+            return
+
+        self.peer_name = peer
+        self.game.start_network_game("X", x_name=self.username, o_name=peer)
+        self.status_label.config(text=f"Network game with {peer}")
+        self.add_chat_line(f"System: Network Tic-Tac-Toe started. You are X.")
+        mysend(self.sock, json.dumps({
+            "action": "game_start",
+            "x_name": self.username,
+            "o_name": peer
+        }))
 
     def send_chat_message(self):
         text = self.message_entry.get().strip()
@@ -351,6 +403,20 @@ class ChatGameClient:
             "from": f"[{self.username}]",
             "message": text
         }))
+
+    def send_game_event(self, event):
+        if self.sock is None:
+            return
+
+        if event.get("type") == "move":
+            mysend(self.sock, json.dumps({
+                "action": "game_move",
+                "row": event["row"],
+                "col": event["col"],
+                "player": event["player"]
+            }))
+        elif event.get("type") == "reset":
+            mysend(self.sock, json.dumps({"action": "game_reset"}))
 
     def close(self):
         self.running = False

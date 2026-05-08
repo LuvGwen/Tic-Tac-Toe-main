@@ -3,7 +3,7 @@ from tkinter import simpledialog
 import random
 
 class TicTacToe:
-    def __init__(self, root, send_network_msg_func=None):
+    def __init__(self, root, send_network_msg_func=None, send_game_event_func=None):
         self.root = root
         if hasattr(self.root, "title"):
             self.root.title("Tic Tac Toe - InternPe Project")
@@ -11,8 +11,11 @@ class TicTacToe:
 
         # 聊天客户端传入的网络发送函数。单独运行井字棋时为 None。
         self.send_network_msg_func = send_network_msg_func
+        self.send_game_event_func = send_game_event_func
 
-        self.game_mode = tk.StringVar(value="Two Players")
+        self.game_mode = tk.StringVar(value="Local Two Players")
+        self.network_symbol = None
+        self.network_enabled = False
         self.difficulty = "Easy"
         self.player_names = {"X": "X", "O": "O"}
         self.current_player = "X"
@@ -27,7 +30,14 @@ class TicTacToe:
         self.create_ui()
 
     def create_ui(self):
-        menu = tk.OptionMenu(self.root, self.game_mode, "Two Players", "Single Player", command=self.on_mode_change)
+        menu = tk.OptionMenu(
+            self.root,
+            self.game_mode,
+            "Local Two Players",
+            "Network Two Players",
+            "Single Player",
+            command=self.on_mode_change
+        )
         menu.config(font=("Helvetica", 12), bg="#dddddd")
         menu.grid(row=0, column=1, pady=(10, 0))
 
@@ -63,7 +73,7 @@ class TicTacToe:
 
         self.restart_button = tk.Button(self.root, text="Restart", font=("Helvetica", 12),
                                         bg="#444444", fg="black", activeforeground="black",
-                                        command=self.reset_board)
+                                        command=self.restart_board)
         self.restart_button.grid(row=6, column=0, pady=15)
 
         self.close_button = tk.Button(self.root, text="Clear Board", font=("Helvetica", 12),
@@ -104,14 +114,38 @@ class TicTacToe:
             self.update_score()
 
     def start_game(self):
+        self.network_enabled = self.game_mode.get() == "Network Two Players"
         self.started = True
         self.update_score()
         self.reset_board()
-        self.start_timer()
+        if self.network_enabled:
+            self.update_network_turn_label()
+        else:
+            self.start_timer()
 
     def on_click(self, row, col):
         if not self.started or self.buttons[row][col]["text"] != "":
             return
+
+        if self.game_mode.get() == "Network Two Players":
+            if not self.network_enabled or self.current_player != self.network_symbol:
+                self.update_network_turn_label()
+                return
+
+            self.make_move(row, col, self.network_symbol)
+            if self.send_game_event_func is not None:
+                self.send_game_event_func({
+                    "type": "move",
+                    "row": row,
+                    "col": col,
+                    "player": self.network_symbol
+                })
+            if self.check_game_over():
+                return
+            self.switch_player()
+            self.update_network_turn_label()
+            return
+
         self.stop_timer()
         self.make_move(row, col, self.current_player)
         if self.check_game_over(): return
@@ -128,6 +162,49 @@ class TicTacToe:
     def switch_player(self):
         self.current_player = "O" if self.current_player == "X" else "X"
         self.update_score()
+
+    def start_network_game(self, symbol, x_name="X", o_name="O"):
+        self.network_symbol = symbol
+        self.network_enabled = True
+        self.game_mode.set("Network Two Players")
+        self.player_names["X"] = x_name
+        self.player_names["O"] = o_name
+        self.name_x_btn.config(text=x_name)
+        self.name_o_btn.config(text=o_name)
+        self.started = True
+        self.reset_board()
+        self.update_score()
+        self.update_network_turn_label()
+
+    def receive_network_move(self, row, col, player):
+        if self.buttons[row][col]["text"] != "":
+            return
+        self.started = True
+        self.network_enabled = True
+        self.game_mode.set("Network Two Players")
+        self.current_player = player
+        self.make_move(row, col, player)
+        if self.check_game_over():
+            return
+        self.switch_player()
+        self.update_network_turn_label()
+
+    def receive_network_reset(self):
+        self.started = True
+        self.network_enabled = True
+        self.game_mode.set("Network Two Players")
+        self.reset_board()
+        self.update_network_turn_label()
+
+    def update_network_turn_label(self):
+        if not self.started or self.game_mode.get() != "Network Two Players":
+            return
+
+        if self.current_player == self.network_symbol:
+            text = f"Network Game - You are {self.network_symbol}. Your turn."
+        else:
+            text = f"Network Game - You are {self.network_symbol}. Waiting for {self.current_player}."
+        self.timer_label.config(text=text)
 
     def ai_move(self):
         row, col = self.get_ai_move()
@@ -229,6 +306,14 @@ class TicTacToe:
 
     def is_draw(self):
         return all(self.board[i][j] != "" for i in range(3) for j in range(3))
+
+    def restart_board(self):
+        self.reset_board()
+        if self.network_enabled and self.send_game_event_func is not None:
+            self.send_game_event_func({"type": "reset"})
+        if self.network_enabled:
+            self.started = True
+            self.update_network_turn_label()
 
     def reset_board(self):
         for i in range(3):

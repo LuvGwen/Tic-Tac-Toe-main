@@ -17,7 +17,7 @@ STOP_WORDS = {
 
 
 def clean_chat_line(line):
-    line = re.sub(r"\[(Positive|Neutral|Negative)\]", "", line)
+    line = re.sub(r"\[(Positive|Neutral|Negative)[^\]]*\]", "", line)
     line = re.sub(r"^\[[^\]]+\]", "", line)
     line = re.sub(r"^System:.*$", "", line)
     return line.strip()

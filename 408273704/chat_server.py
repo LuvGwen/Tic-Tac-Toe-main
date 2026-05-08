@@ -76,6 +76,22 @@ class Server:
         for sock in list(self.logged_name2sock.values()):
             mysend(sock, leaderboard_msg)
 
+    def forward_to_chat_group(self, from_sock, msg):
+        from_name = self.logged_sock2name[from_sock]
+        msg["from"] = from_name
+        the_guys = self.group.list_me(from_name)[1:]
+
+        if len(the_guys) == 0:
+            mysend(from_sock, json.dumps({
+                "action": "system",
+                "message": "No connected peer. Connect to a peer before starting a network game."
+            }))
+            return
+
+        for g in the_guys:
+            to_sock = self.logged_name2sock[g]
+            mysend(to_sock, json.dumps(msg))
+
     def new_client(self, sock):
         # add to all sockets and to new clients
         print('new client...')
@@ -198,6 +214,8 @@ class Server:
                     mysend(to_sock, json.dumps(msg))
                     # 注意：一定要把原本占位的那句 mysend(to_sock, "...Remember to index...") 删掉！
                     # ---- end of your code --- #
+            elif msg["action"] in ["game_start", "game_move", "game_reset"]:
+                self.forward_to_chat_group(from_sock, msg)
             elif msg["action"] == "disconnect":
                 from_name = self.logged_sock2name[from_sock]
                 the_guys = self.group.list_me(from_name)
