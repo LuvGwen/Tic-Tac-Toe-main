@@ -41,7 +41,10 @@ class Server:
         self.group = grp.Group()
         # start server
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.bind(SERVER)
+        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Listen on all network interfaces so other computers on the same network
+        # can connect using this computer's LAN IP address.
+        self.server.bind(("0.0.0.0", CHAT_PORT))
         self.server.listen(5)
         self.all_sockets.append(self.server)
         # initialize past chat indices
